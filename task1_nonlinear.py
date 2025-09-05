@@ -567,7 +567,11 @@ class NonlinearNIPTAnalyzer:
         print("参数估计结果:")
         for i, (name, param, pval) in enumerate(zip(var_names, params, pvalues)):
             significance = "***" if pval < 0.001 else "**" if pval < 0.01 else "*" if pval < 0.05 else ""
-            conf_lower, conf_upper = conf_int.iloc[i]
+            # 处理置信区间，无论是DataFrame还是numpy数组
+            if hasattr(conf_int, 'iloc'):
+                conf_lower, conf_upper = conf_int.iloc[i]
+            else:
+                conf_lower, conf_upper = conf_int[i]
             print(f"{name}: {param:.6f}{significance}")
             print(f"  95%置信区间: [{conf_lower:.6f}, {conf_upper:.6f}]")
             print(f"  p值: {pval:.6f}")
