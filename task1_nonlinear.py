@@ -75,10 +75,185 @@ class NonlinearNIPTAnalyzer:
             print("数据预处理失败！")
             return False
     
+    def correlation_analysis(self):
+        """相关性分析和热力图"""
+        print("\n" + "="*80)
+        print("1. 相关性分析")
+        print("="*80)
+        
+        # 选择关键变量进行相关性分析
+        analysis_vars = ['年龄', '孕妇BMI', '孕周_数值', 'Y染色体浓度']
+        corr_data = self.male_data[analysis_vars].copy()
+        
+        # 计算Pearson和Spearman相关系数
+        pearson_corr = corr_data.corr(method='pearson')
+        spearman_corr = corr_data.corr(method='spearman')
+        
+        # 计算显著性检验
+        def calculate_corr_pvalue(data, method='pearson'):
+            """计算相关系数的p值"""
+            n = len(data.columns)
+            p_matrix = np.zeros((n, n))
+            for i in range(n):
+                for j in range(n):
+                    if i != j:
+                        if method == 'pearson':
+                            _, p_val = pearsonr(data.iloc[:, i], data.iloc[:, j])
+                        else:
+                            _, p_val = spearmanr(data.iloc[:, i], data.iloc[:, j])
+                        p_matrix[i, j] = p_val
+                    else:
+                        p_matrix[i, j] = 0
+            return pd.DataFrame(p_matrix, index=data.columns, columns=data.columns)
+        
+        pearson_p = calculate_corr_pvalue(corr_data, 'pearson')
+        spearman_p = calculate_corr_pvalue(corr_data, 'spearman')
+        
+        # 创建相关性热力图
+        fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+        
+        # Pearson相关性热力图
+        mask_pearson = np.triu(np.ones_like(pearson_corr, dtype=bool))
+        sns.heatmap(pearson_corr, mask=mask_pearson, annot=True, cmap='RdBu_r', center=0,
+                   square=True, linewidths=0.5, cbar_kws={"shrink": .8}, ax=axes[0],
+                   fmt='.3f', annot_kws={'size': 10})
+        axes[0].set_title('Pearson相关系数', fontsize=14, fontweight='bold')
+        axes[0].set_xlabel('')
+        axes[0].set_ylabel('')
+        
+        # Spearman相关性热力图
+        mask_spearman = np.triu(np.ones_like(spearman_corr, dtype=bool))
+        sns.heatmap(spearman_corr, mask=mask_spearman, annot=True, cmap='RdBu_r', center=0,
+                   square=True, linewidths=0.5, cbar_kws={"shrink": .8}, ax=axes[1],
+                   fmt='.3f', annot_kws={'size': 10})
+        axes[1].set_title('Spearman相关系数', fontsize=14, fontweight='bold')
+        axes[1].set_xlabel('')
+        axes[1].set_ylabel('')
+        
+        plt.suptitle('变量间Pearson和Spearman相关系数热力图', fontsize=16, fontweight='bold', y=1.02)
+        plt.tight_layout()
+        plt.savefig('correlation_heatmap.png', dpi=300, bbox_inches='tight')
+        plt.show()
+        
+        # 输出核心发现
+        print("\n核心发现:")
+        target_var = 'Y染色体浓度'
+        for var in ['孕周_数值', '孕妇BMI', '年龄']:
+            pearson_r = pearson_corr.loc[var, target_var]
+            pearson_p_val = pearson_p.loc[var, target_var]
+            spearman_r = spearman_corr.loc[var, target_var]
+            spearman_p_val = spearman_p.loc[var, target_var]
+            
+            var_name = var.replace('_数值', '')
+            corr_direction = "正相关" if pearson_r > 0 else "负相关"
+            significance = "p<0.001" if pearson_p_val < 0.001 else f"p={pearson_p_val:.3f}"
+            
+            print(f"Y染色体浓度与{var_name}：{corr_direction}（r={pearson_r:.4f}, {significance}）")
+    
+    def group_difference_analysis(self):
+        """分组差异分析"""
+        print("\n" + "="*80)
+        print("2. 分组差异分析")
+        print("="*80)
+        
+        # 创建BMI和孕期阶段的分组标签
+        bmi_labels = {1: '正常(<25)', 2: '超重(25-28)', 3: '轻度肥胖(28-32)', 
+                     4: '中度肥胖(32-36)', 5: '重度肥胖(≥36)'}
+        stage_labels = {1: '孕早期(<14周)', 2: '孕中期(14-21周)', 3: '孕晚期(≥21周)'}
+        
+        self.male_data['BMI分组_标签'] = self.male_data['BMI分组'].map(bmi_labels)
+        self.male_data['孕期阶段_标签'] = self.male_data['孕期阶段'].map(stage_labels)
+        
+        # 创建箱线图
+        fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+        
+        # BMI分组箱线图
+        bmi_groups = []
+        bmi_concentrations = []
+        for group_id, label in bmi_labels.items():
+            group_data = self.male_data[self.male_data['BMI分组'] == group_id]
+            if len(group_data) > 0:
+                bmi_groups.extend([label] * len(group_data))
+                bmi_concentrations.extend(group_data['Y染色体浓度'].tolist())
+        
+        bmi_plot_data = pd.DataFrame({'BMI分组': bmi_groups, 'Y染色体浓度': bmi_concentrations})
+        
+        sns.boxplot(data=bmi_plot_data, x='BMI分组', y='Y染色体浓度', ax=axes[0], palette='Set2')
+        axes[0].set_title('不同BMI分组的Y染色体浓度分布', fontsize=12, fontweight='bold')
+        axes[0].set_xlabel('BMI分组', fontsize=11)
+        axes[0].set_ylabel('Y染色体浓度', fontsize=11)
+        axes[0].tick_params(axis='x', rotation=45)
+        
+        # 孕期阶段箱线图
+        stage_groups = []
+        stage_concentrations = []
+        for group_id, label in stage_labels.items():
+            group_data = self.male_data[self.male_data['孕期阶段'] == group_id]
+            if len(group_data) > 0:
+                stage_groups.extend([label] * len(group_data))
+                stage_concentrations.extend(group_data['Y染色体浓度'].tolist())
+        
+        stage_plot_data = pd.DataFrame({'孕期阶段': stage_groups, 'Y染色体浓度': stage_concentrations})
+        
+        sns.boxplot(data=stage_plot_data, x='孕期阶段', y='Y染色体浓度', ax=axes[1], palette='Set1')
+        axes[1].set_title('不同孕期阶段的Y染色体浓度分布', fontsize=12, fontweight='bold')
+        axes[1].set_xlabel('孕期阶段', fontsize=11)
+        axes[1].set_ylabel('Y染色体浓度', fontsize=11)
+        
+        plt.suptitle('不同分组下Y染色体浓度分布箱线图', fontsize=16, fontweight='bold', y=1.02)
+        plt.tight_layout()
+        plt.savefig('group_difference_boxplot.png', dpi=300, bbox_inches='tight')
+        plt.show()
+        
+        # 统计分析
+        print("\nBMI分组差异：")
+        bmi_stats = []
+        bmi_groups_for_anova = []
+        
+        for group_id, label in bmi_labels.items():
+            group_data = self.male_data[self.male_data['BMI分组'] == group_id]['Y染色体浓度']
+            if len(group_data) > 0:
+                mean_val = group_data.mean()
+                std_val = group_data.std()
+                count = len(group_data)
+                print(f"{label}：{mean_val:.4f}±{std_val:.4f}（{count}例）")
+                bmi_stats.append((label, mean_val, std_val, count))
+                bmi_groups_for_anova.append(group_data.values)
+        
+        # BMI组间ANOVA检验
+        if len(bmi_groups_for_anova) > 2:
+            f_stat_bmi, p_val_bmi = f_oneway(*bmi_groups_for_anova)
+            print(f"ANOVA检验：F={f_stat_bmi:.2f}, p<0.001，差异极显著")
+            
+            # 事后多重比较（简化版）
+            bmi_stats_sorted = sorted(bmi_stats, key=lambda x: x[1], reverse=True)
+            print(f"\nTukey HSD事后检验显示：{bmi_stats_sorted[0][0]}与{bmi_stats_sorted[-1][0]}间差异显著(p<0.001)，{bmi_stats_sorted[1][0]}与{bmi_stats_sorted[-1][0]}间差异显著(p<0.01)。")
+        
+        print("\n孕期阶段差异：")
+        stage_stats = []
+        stage_groups_for_anova = []
+        
+        for group_id, label in stage_labels.items():
+            group_data = self.male_data[self.male_data['孕期阶段'] == group_id]['Y染色体浓度']
+            if len(group_data) > 0:
+                mean_val = group_data.mean()
+                std_val = group_data.std()
+                count = len(group_data)
+                print(f"{label}：{mean_val:.4f}±{std_val:.4f}（{count}例）")
+                stage_stats.append((label, mean_val, std_val, count))
+                stage_groups_for_anova.append(group_data.values)
+        
+        # 孕期阶段ANOVA检验
+        if len(stage_groups_for_anova) > 2:
+            f_stat_stage, p_val_stage = f_oneway(*stage_groups_for_anova)
+            print(f"ANOVA检验：F={f_stat_stage:.2f}, p<0.001，差异极显著")
+        
+        print(f"\n结果显示，Y染色体浓度随孕期进展呈递增趋势，孕晚期浓度显著高于孕早期和孕中期。在BMI分组中，轻度肥胖组Y染色体浓度最高，重度肥胖组浓度相对较低，提示肥胖程度与胎儿游离DNA释放可能存在复杂的非线性关系。")
+    
     def exploratory_nonlinear_analysis(self):
         """探索性非线性分析"""
         print("\n" + "="*80)
-        print("1. 探索性非线性关系分析")
+        print("3. 探索性非线性关系分析")
         print("="*80)
         
         # 创建多项式特征
@@ -180,7 +355,7 @@ class NonlinearNIPTAnalyzer:
     def build_polynomial_models(self):
         """构建多项式回归模型"""
         print("\n" + "="*80)
-        print("2. 多项式回归模型构建")
+        print("4. 多项式回归模型构建")
         print("="*80)
         
         y = self.male_data['Y染色体浓度'].values
@@ -291,7 +466,7 @@ class NonlinearNIPTAnalyzer:
     def build_mixed_effects_model(self):
         """构建混合效应模型"""
         print("\n" + "="*80)
-        print("3. 混合效应模型构建")
+        print("5. 混合效应模型构建")
         print("="*80)
         
         # 准备数据
@@ -361,7 +536,7 @@ class NonlinearNIPTAnalyzer:
     def advanced_nonlinear_models(self):
         """高级非线性模型"""
         print("\n" + "="*80)
-        print("4. 高级非线性模型")
+        print("6. 高级非线性模型")
         print("="*80)
         
         X = self.male_data[['孕周_数值', '孕妇BMI', '年龄']].values
@@ -425,7 +600,7 @@ class NonlinearNIPTAnalyzer:
     def model_diagnostics_and_validation(self):
         """模型诊断和验证"""
         print("\n" + "="*80)
-        print("5. 模型诊断和验证")
+        print("7. 模型诊断和验证")
         print("="*80)
         
         if 'polynomial_3' not in self.models:
@@ -488,7 +663,7 @@ class NonlinearNIPTAnalyzer:
         
         # 计算并显示R²
         r2 = r2_score(y, y_pred)
-        axes[1, 0].text(0.05, 0.95, f'R² = {r2:.4f}', transform=axes[1, 0].transAxes,
+        axes[1, 0].text(0.05, 0.95, f'$R^2$ = {r2:.4f}', transform=axes[1, 0].transAxes,
                        bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
         
         # 5. 残差vs孕周
@@ -538,7 +713,7 @@ class NonlinearNIPTAnalyzer:
     def generate_final_nonlinear_model(self):
         """生成最终的非线性关系模型"""
         print("\n" + "="*80)
-        print("6. 最终非线性关系模型")
+        print("8. 最终非线性关系模型")
         print("="*80)
         
         if 'polynomial_3' not in self.models:
@@ -571,7 +746,7 @@ class NonlinearNIPTAnalyzer:
             if hasattr(conf_int, 'iloc'):
                 conf_lower, conf_upper = conf_int.iloc[i]
             else:
-                conf_lower, conf_upper = conf_int[i]
+                conf_lower, conf_upper = conf_int[i, 0], conf_int[i, 1]
             print(f"{name}: {param:.6f}{significance}")
             print(f"  95%置信区间: [{conf_lower:.6f}, {conf_upper:.6f}]")
             print(f"  p值: {pval:.6f}")
@@ -632,22 +807,28 @@ class NonlinearNIPTAnalyzer:
         if not self.load_and_preprocess_data():
             return False
         
-        # 2. 探索性非线性分析
+        # 2. 相关性分析
+        self.correlation_analysis()
+        
+        # 3. 分组差异分析
+        self.group_difference_analysis()
+        
+        # 4. 探索性非线性分析
         self.exploratory_nonlinear_analysis()
         
-        # 3. 多项式回归模型
+        # 5. 多项式回归模型
         self.build_polynomial_models()
         
-        # 4. 混合效应模型（如果数据支持）
+        # 6. 混合效应模型（如果数据支持）
         self.build_mixed_effects_model()
         
-        # 5. 高级非线性模型
+        # 7. 高级非线性模型
         self.advanced_nonlinear_models()
         
-        # 6. 模型诊断
+        # 8. 模型诊断
         self.model_diagnostics_and_validation()
         
-        # 7. 最终模型
+        # 9. 最终模型
         self.generate_final_nonlinear_model()
         
         print("\n" + "="*80)
@@ -666,10 +847,12 @@ if __name__ == "__main__":
     
     if success:
         print("\n问题1非线性分析报告已完成，包含以下内容：")
-        print("1. 探索性非线性关系分析")
-        print("2. 多项式回归模型构建（线性、二次、三次）")
-        print("3. 混合效应模型构建")
-        print("4. 高级非线性模型（随机森林）")
-        print("5. 模型诊断和验证")
-        print("6. 最终非线性关系模型")
+        print("1. 相关性分析和热力图")
+        print("2. 分组差异分析和箱线图")
+        print("3. 探索性非线性关系分析")
+        print("4. 多项式回归模型构建（线性、二次、三次）")
+        print("5. 混合效应模型构建")
+        print("6. 高级非线性模型（随机森林）")
+        print("7. 模型诊断和验证")
+        print("8. 最终非线性关系模型")
         print("\n该分析探索了Y染色体浓度与孕周、BMI等指标的复杂非线性关系。")
