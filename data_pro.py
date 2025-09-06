@@ -176,7 +176,63 @@ class DataPreprocessorCorrect:
             self.data['孕期阶段_编码'] = self.data['孕周_数值'].apply(pregnancy_stage)
             print("孕期阶段: 0=未知, 1=孕早期, 2=孕中期, 3=孕晚期")
         
-        # 5. 处理染色体非整倍体，新增缺失比例检查
+        # 5. 处理身高体重数据清洗和标准化
+        print("\n处理身高体重数据...")
+        
+        # 处理身高数据
+        if '身高' in self.data.columns:
+            print("清洗身高数据...")
+            # 去除异常值和标准化身高（正常范围：140-200cm）
+            height_before = self.data['身高'].notna().sum()
+            self.data['身高'] = pd.to_numeric(self.data['身高'], errors='coerce')
+            self.data['身高'] = self.data['身高'].where(
+                (self.data['身高'] >= 140) & (self.data['身高'] <= 200), np.nan
+            )
+            height_after = self.data['身高'].notna().sum()
+            print(f"身高数据: {height_before} -> {height_after} (去除异常值)")
+            
+            # 身高分组
+            def height_group(height):
+                if pd.isna(height): return 0
+                elif height < 155: return 1  # 偏矮
+                elif height < 165: return 2  # 中等
+                else: return 3               # 偏高
+            
+            self.data['身高分组_编码'] = self.data['身高'].apply(height_group)
+            print("身高分组: 0=未知, 1=偏矮(<155cm), 2=中等(155-165cm), 3=偏高(≥165cm)")
+        
+        # 处理体重数据
+        if '体重' in self.data.columns:
+            print("清洗体重数据...")
+            # 去除异常值和标准化体重（正常范围：40-120kg，考虑孕妇）
+            weight_before = self.data['体重'].notna().sum()
+            self.data['体重'] = pd.to_numeric(self.data['体重'], errors='coerce')
+            self.data['体重'] = self.data['体重'].where(
+                (self.data['体重'] >= 40) & (self.data['体重'] <= 120), np.nan
+            )
+            weight_after = self.data['体重'].notna().sum()
+            print(f"体重数据: {weight_before} -> {weight_after} (去除异常值)")
+            
+            # 体重分组（针对孕妇的合理分组）
+            def weight_group(weight):
+                if pd.isna(weight): return 0
+                elif weight < 55: return 1   # 偏轻
+                elif weight < 70: return 2   # 正常
+                elif weight < 85: return 3   # 偏重
+                else: return 4               # 超重
+            
+            self.data['体重分组_编码'] = self.data['体重'].apply(weight_group)
+            print("体重分组: 0=未知, 1=偏轻(<55kg), 2=正常(55-70kg), 3=偏重(70-85kg), 4=超重(≥85kg)")
+        
+        # 如果有身高体重数据但没有BMI，计算BMI
+        if '身高' in self.data.columns and '体重' in self.data.columns and '孕妇BMI' not in self.data.columns:
+            print("根据身高体重计算BMI...")
+            # BMI = 体重(kg) / (身高(m))^2
+            self.data['孕妇BMI'] = self.data['体重'] / ((self.data['身高'] / 100) ** 2)
+            bmi_count = self.data['孕妇BMI'].notna().sum()
+            print(f"成功计算BMI: {bmi_count}个样本")
+        
+        # 6. 处理染色体非整倍体，新增缺失比例检查
         if '染色体的非整倍体' in self.data.columns:
             missing_ratio = self.data['染色体的非整倍体'].isnull().mean()
             print(f"染色体非整倍体缺失比例: {missing_ratio:.2%}")
@@ -192,7 +248,7 @@ class DataPreprocessorCorrect:
             print("染色体异常编码: 0=正常, 1=异常, -1=未知")
         
         # 6. 处理关键字段缺失，使用 KNN 插值代替直接删除（如果缺失比例不高）
-        key_columns = ['年龄', '孕妇BMI', '孕周_数值', 'Y染色体浓度', '胎儿健康_数值']
+        key_columns = ['年龄', '孕妇BMI', '孕周_数值', 'Y染色体浓度', '胎儿健康_数值', '身高', '体重']
         available_key_cols = [col for col in key_columns if col in self.data.columns]
         
         if available_key_cols:
@@ -220,6 +276,10 @@ class DataPreprocessorCorrect:
             self.data['孕周_数值'] = np.clip(self.data['孕周_数值'], 9, 40)
         if '年龄' in self.data.columns:
             self.data['年龄'] = np.clip(self.data['年龄'], 18, 50)  # 假设孕妇年龄范围
+        if '身高' in self.data.columns:
+            self.data['身高'] = np.clip(self.data['身高'], 140, 200)  # 身高合理范围
+        if '体重' in self.data.columns:
+            self.data['体重'] = np.clip(self.data['体重'], 40, 120)   # 孕妇体重合理范围
         print("异常值截断完成")
     
     def create_derived_features(self):
@@ -253,6 +313,11 @@ class DataPreprocessorCorrect:
             self.data['孕周平方'] = self.data['孕周_数值'] ** 2
             print("创建孕周平方特征")
         
+        # 4. 新增：身高 * 体重交互项
+        if '身高' in self.data.columns and '体重' in self.data.columns:
+            self.data['身高体重交互'] = self.data['身高'] * self.data['体重']
+            print("创建身高-体重交互特征")
+        
         # 5. 新增：孕周 * BMI 交互项（探索更多关系）
         if '孕周_数值' in self.data.columns and '孕妇BMI' in self.data.columns:
             self.data['孕周BMI交互'] = self.data['孕周_数值'] * self.data['孕妇BMI']
@@ -266,11 +331,11 @@ class DataPreprocessorCorrect:
         
         # 选择数值型特征进行标准化（排除目标变量）
         numeric_features = [
-            '年龄', '孕妇BMI', '孕周_数值'  # 排除 'Y染色体浓度'
+            '年龄', '孕妇BMI', '孕周_数值', '身高', '体重'  # 排除 'Y染色体浓度'，添加身高体重
         ]
         
         # 添加可用的衍生数值特征
-        derived_numeric = ['Z值异常度', 'GC含量均值', 'GC含量标准差', 'BMI年龄交互', '孕周平方', '孕周BMI交互']
+        derived_numeric = ['Z值异常度', 'GC含量均值', 'GC含量标准差', 'BMI年龄交互', '孕周平方', '孕周BMI交互', '身高体重交互']
         for col in derived_numeric:
             if col in self.data.columns:
                 numeric_features.append(col)
@@ -298,7 +363,7 @@ class DataPreprocessorCorrect:
         # 分类特征（已编码）
         categorical_features = [
             'IVF妊娠_编码', 'BMI分组_编码', '年龄分组_编码', 
-            '孕期阶段_编码', '染色体异常_编码'
+            '孕期阶段_编码', '染色体异常_编码', '身高分组_编码', '体重分组_编码'
         ]
         categorical_features = [col for col in categorical_features if col in self.data.columns]
         print(f"分类特征 ({len(categorical_features)}个): {categorical_features}")
